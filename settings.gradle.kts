@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Deep Current"
+rootProject.name = "Mr Unknown"
 
 include(":app")

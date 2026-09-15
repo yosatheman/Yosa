@@ -3,8 +3,13 @@ package com.example.tunnel
 import com.example.data.ProfileEntity
 import org.json.JSONObject
 import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object ConfigParser {
+
+    const val TERMUX_EXTENSION = ".termux"
 
     fun exportToJson(profile: ProfileEntity): String {
         val json = JSONObject().apply {
@@ -44,17 +49,101 @@ object ConfigParser {
         return json.toString(2)
     }
 
+    fun exportToTermux(profile: ProfileEntity): String {
+        val jsonPayload = exportToJson(profile)
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        val termuxCommand = when (profile.transport.uppercase()) {
+            "SSH" -> "ssh -p ${profile.port} -D 1080 ${if (profile.username.isNotEmpty()) "${profile.username}@" else ""}${profile.host}"
+            "WS" -> "curl -i -N -H \"Connection: Upgrade\" -H \"Upgrade: websocket\" http://${profile.host}:${profile.port}${profile.wsPath}"
+            else -> "curl -vk https://${profile.host}:${profile.port}"
+        }
+
+        return buildString {
+            appendLine("#!/bin/bash")
+            appendLine("# ========================================================")
+            appendLine("# MR UNKNOWN CONFIGURATION FILE (.termux)")
+            appendLine("# Target Application : Mr Unknown Android & Termux Shell")
+            appendLine("# Profile Name       : ${profile.name}")
+            appendLine("# Transport Protocol : ${profile.transport}")
+            appendLine("# Target Server      : ${profile.host}:${profile.port}")
+            appendLine("# File Extension     : $TERMUX_EXTENSION")
+            appendLine("# Exported Date      : $timestamp")
+            appendLine("# ========================================================")
+            appendLine("#")
+            appendLine("# Termux Direct Test Command:")
+            appendLine("#   $termuxCommand")
+            appendLine("#")
+            appendLine("# [MR_UNKNOWN_TERMUX_CONFIG]")
+            appendLine(jsonPayload)
+            appendLine("# [/MR_UNKNOWN_TERMUX_CONFIG]")
+        }
+    }
+
+    fun getTermuxFileName(profile: ProfileEntity): String {
+        val sanitized = profile.name
+            .trim()
+            .replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            .lowercase(Locale.ROOT)
+            .ifEmpty { "tunnel_profile" }
+        return "$sanitized$TERMUX_EXTENSION"
+    }
+
     fun parse(content: String): ProfileEntity? {
         val trimmed = content.trim()
         return try {
             when {
+                // 1. .termux configuration block
+                trimmed.contains("[MR_UNKNOWN_TERMUX_CONFIG]") || trimmed.contains("[MR_UNKNOWN_CONFIG]") -> {
+                    parseTermuxBlock(trimmed)
+                }
+                // 2. Shell file with embedded JSON
+                trimmed.startsWith("#!/bin/bash") || trimmed.contains(".termux") || trimmed.contains("MR UNKNOWN") -> {
+                    val startIdx = trimmed.indexOf("{")
+                    val endIdx = trimmed.lastIndexOf("}")
+                    if (startIdx != -1 && endIdx > startIdx) {
+                        parseJson(trimmed.substring(startIdx, endIdx + 1))
+                    } else {
+                        parseTermuxBlock(trimmed)
+                    }
+                }
+                // 3. Raw JSON
                 trimmed.startsWith("{") && trimmed.endsWith("}") -> parseJson(trimmed)
+                // 4. SSH URI
                 trimmed.startsWith("ssh://", ignoreCase = true) -> parseSshUri(trimmed)
+                // 5. HTTP Custom (.hc)
                 trimmed.contains("[crlf]") || trimmed.contains("HTTP Custom") || trimmed.contains(".hc") -> parseHc(trimmed)
+                // 6. Plaintext host:port
                 trimmed.contains(":") -> parsePlaintext(trimmed)
                 else -> null
             }
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parseTermuxBlock(content: String): ProfileEntity? {
+        val startMarker1 = "[MR_UNKNOWN_TERMUX_CONFIG]"
+        val endMarker1 = "[/MR_UNKNOWN_TERMUX_CONFIG]"
+        val startMarker2 = "[MR_UNKNOWN_CONFIG]"
+        val endMarker2 = "[/MR_UNKNOWN_CONFIG]"
+
+        val rawJson = when {
+            content.contains(startMarker1) && content.contains(endMarker1) -> {
+                content.substringAfter(startMarker1).substringBefore(endMarker1).trim()
+            }
+            content.contains(startMarker2) && content.contains(endMarker2) -> {
+                content.substringAfter(startMarker2).substringBefore(endMarker2).trim()
+            }
+            else -> {
+                val start = content.indexOf("{")
+                val end = content.lastIndexOf("}")
+                if (start != -1 && end > start) content.substring(start, end + 1) else null
+            }
+        }
+
+        return if (!rawJson.isNullOrBlank()) {
+            parseJson(rawJson)
+        } else {
             null
         }
     }

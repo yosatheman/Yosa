@@ -52,6 +52,8 @@ class MainViewModel : ViewModel() {
     val isServerDetailOpen = MutableStateFlow(false)
     val profileContextMenuTarget = MutableStateFlow<ProfileEntity?>(null)
     val qrShareProfile = MutableStateFlow<ProfileEntity?>(null)
+    val exportTermuxProfile = MutableStateFlow<ProfileEntity?>(null)
+    val isTermuxToolsOpen = MutableStateFlow(false)
     val isSpeedTestOpen = MutableStateFlow(false)
     val isPayloadLibraryOpen = MutableStateFlow(false)
     val deleteConfirmProfile = MutableStateFlow<ProfileEntity?>(null)
@@ -218,6 +220,23 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch {
             repository.insertProfile(parsed)
             snackbarMessage.value = "Imported config: ${parsed.name}"
+        }
+        return true
+    }
+
+    fun importConfigFile(fileName: String, content: String): Boolean {
+        val parsed = ConfigParser.parse(content) ?: return false
+        val cleanName = if (parsed.name == "Imported Profile" || parsed.name.isBlank()) {
+            fileName.removeSuffix(".termux").removeSuffix(".json").removeSuffix(".hc")
+                .replace("_", " ")
+                .trim()
+                .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        } else {
+            parsed.name
+        }
+        viewModelScope.launch {
+            repository.insertProfile(parsed.copy(name = cleanName))
+            snackbarMessage.value = "Imported $fileName (${parsed.transport})"
         }
         return true
     }

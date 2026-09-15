@@ -3,8 +3,12 @@ package com.example.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,11 +43,16 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Terminal
+import androidx.core.content.FileProvider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -318,6 +327,21 @@ fun ProfileContextMenuBottomSheet(
                 onDismiss()
                 viewModel.startEditProfile(profile)
             }
+            ContextRow(icon = Icons.Default.FileDownload, label = "Export .termux Config File") {
+                onDismiss()
+                viewModel.exportTermuxProfile.value = profile
+            }
+            ContextRow(icon = Icons.Default.Terminal, label = "Copy Termux Command") {
+                onDismiss()
+                val cmd = when (profile.transport.uppercase()) {
+                    "SSH" -> "ssh -p ${profile.port} -D 1080 ${if (profile.username.isNotEmpty()) "${profile.username}@" else ""}${profile.host}"
+                    "WS" -> "curl -i -N -H \"Connection: Upgrade\" -H \"Upgrade: websocket\" http://${profile.host}:${profile.port}${profile.wsPath}"
+                    else -> "curl -vk https://${profile.host}:${profile.port}"
+                }
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Termux Command", cmd))
+                Toast.makeText(context, "Termux command copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
             ContextRow(icon = Icons.Default.ContentCopy, label = "Duplicate Profile") {
                 onDismiss()
                 viewModel.duplicateProfile(profile)
@@ -336,6 +360,181 @@ fun ProfileContextMenuBottomSheet(
             }
         }
     }
+}
+
+@Composable
+fun ExportTermuxModal(
+    profile: ProfileEntity,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val colors = DeepCurrentTheme.colors
+    val fileName = remember(profile) { ConfigParser.getTermuxFileName(profile) }
+    val termuxContent = remember(profile) { ConfigParser.exportToTermux(profile) }
+
+    val createDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(termuxContent.toByteArray(Charsets.UTF_8))
+                }
+                Toast.makeText(context, "Saved $fileName successfully", Toast.LENGTH_LONG).show()
+                onDismiss()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to save file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Terminal, contentDescription = null, tint = colors.accent, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Export .termux Config", color = colors.textHi, style = DeepCurrentTheme.typography.titleLarge)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // File name banner
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(DeepCurrentTheme.radius.card)
+                        .background(colors.bgBase)
+                        .border(1.dp, colors.accent.copy(alpha = 0.4f), DeepCurrentTheme.radius.card)
+                        .padding(12.dp)
+                ) {
+                    Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = fileName,
+                            style = DeepCurrentMonoStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            color = colors.textHi
+                        )
+                        Text(
+                            text = "Format: Mr Unknown · Extension: .termux",
+                            style = DeepCurrentTheme.typography.labelSmall,
+                            color = colors.accent
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "File Contents (.termux):",
+                    style = DeepCurrentTheme.typography.labelMedium,
+                    color = colors.textMid
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .clip(DeepCurrentTheme.radius.card)
+                        .background(colors.bgBase)
+                        .border(1.dp, colors.borderSubtle, DeepCurrentTheme.radius.card)
+                        .padding(8.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = termuxContent,
+                        style = DeepCurrentMonoStyle.copy(fontSize = 11.sp, color = colors.textMid)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Fast Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Share .termux file via Intent
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val exportDir = java.io.File(context.cacheDir, "exports")
+                                exportDir.mkdirs()
+                                val cacheFile = java.io.File(exportDir, fileName)
+                                cacheFile.writeText(termuxContent)
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    cacheFile
+                                )
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/octet-stream"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(Intent.EXTRA_SUBJECT, fileName)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share $fileName"))
+                            } catch (e: Exception) {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, termuxContent)
+                                    putExtra(Intent.EXTRA_SUBJECT, fileName)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Share $fileName"))
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accent),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle),
+                        shape = DeepCurrentTheme.radius.pill
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Share", fontSize = 12.sp)
+                    }
+
+                    // Copy raw .termux script
+                    OutlinedButton(
+                        onClick = {
+                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText(fileName, termuxContent))
+                            Toast.makeText(context, "Full .termux config copied", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textHi),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle),
+                        shape = DeepCurrentTheme.radius.pill
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Copy", fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    createDocLauncher.launch(fileName)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.bgBase),
+                shape = DeepCurrentTheme.radius.pill
+            ) {
+                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Save $fileName", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = colors.textMid)
+            }
+        },
+        containerColor = colors.bgElevated
+    )
 }
 
 @Composable
@@ -366,7 +565,7 @@ fun QrShareModal(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Scan with Deep Current on another device to import.",
+                    text = "Scan with Mr Unknown on another device to import.",
                     style = DeepCurrentTheme.typography.bodyMedium,
                     color = colors.textMid
                 )
@@ -614,33 +813,119 @@ fun PayloadLibraryBottomSheet(
 @Composable
 fun ImportConfigDialog(
     onImport: (String) -> Boolean,
+    onImportFile: ((String, String) -> Boolean)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val colors = DeepCurrentTheme.colors
     var importText by remember { mutableStateOf("") }
+    var selectedFileName by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Parse preview whenever importText changes
+    val parsedPreview = remember(importText) {
+        if (importText.isNotBlank()) ConfigParser.parse(importText) else null
+    }
+
+    val openFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                var fileName = "config.termux"
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        cursor.getString(nameIndex)?.let { fileName = it }
+                    }
+                }
+                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                if (content.isNotBlank()) {
+                    selectedFileName = fileName
+                    importText = content
+                    errorMessage = null
+                } else {
+                    errorMessage = "Selected file is empty."
+                }
+            } catch (e: Exception) {
+                errorMessage = "Failed to read file: ${e.message}"
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Import Tunnel Config", color = colors.textHi) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.FileDownload, contentDescription = null, tint = colors.accent, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Import Config (.termux)", color = colors.textHi, style = DeepCurrentTheme.typography.titleLarge)
+            }
+        },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Accepts .json (native), .hc (HTTP Custom), or ssh://user:pass@host:port format.",
+                    text = "Import Mr Unknown .termux profiles, native JSON, or SSH URIs directly.",
                     style = DeepCurrentTheme.typography.bodyMedium,
                     color = colors.textLo
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // File picker button
+                OutlinedButton(
+                    onClick = { openFileLauncher.launch("*/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = colors.bgBase,
+                        contentColor = colors.accent
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.accent.copy(alpha = 0.6f)),
+                    shape = DeepCurrentTheme.radius.pill
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Select .termux / Config File", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+
+                if (selectedFileName != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(DeepCurrentTheme.radius.chip)
+                            .background(colors.accent.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = selectedFileName!!,
+                            style = DeepCurrentMonoStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.accent)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text(
+                        text = "Or paste raw payload:",
+                        style = DeepCurrentTheme.typography.labelSmall,
+                        color = colors.textMid
+                    )
                     TextButton(onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val clip = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-                        if (clip.isNotEmpty()) importText = clip
+                        if (clip.isNotEmpty()) {
+                            importText = clip
+                            selectedFileName = null
+                            errorMessage = null
+                        }
                     }) {
                         Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
@@ -656,9 +941,15 @@ fun ImportConfigDialog(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp),
-                    textStyle = DeepCurrentMonoStyle.copy(fontSize = 12.sp),
-                    placeholder = { Text("Paste configuration payload...", color = colors.textLo, style = DeepCurrentMonoStyle.copy(fontSize = 12.sp)) },
+                        .height(110.dp),
+                    textStyle = DeepCurrentMonoStyle.copy(fontSize = 11.sp),
+                    placeholder = {
+                        Text(
+                            "Paste .termux shell script, JSON, or ssh:// URI...",
+                            color = colors.textLo,
+                            style = DeepCurrentMonoStyle.copy(fontSize = 11.sp)
+                        )
+                    },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = colors.accent,
                         unfocusedBorderColor = colors.borderSubtle,
@@ -667,6 +958,29 @@ fun ImportConfigDialog(
                         cursorColor = colors.accent
                     )
                 )
+
+                // Parsed preview card
+                if (parsedPreview != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(DeepCurrentTheme.radius.card)
+                            .background(colors.accent.copy(alpha = 0.08f))
+                            .border(1.dp, colors.accent.copy(alpha = 0.3f), DeepCurrentTheme.radius.card)
+                            .padding(8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("DETECTED:", style = DeepCurrentTheme.typography.labelSmall, color = colors.accent, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(parsedPreview.name, style = DeepCurrentTheme.typography.bodyMedium, color = colors.textHi, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = "Transport: ${parsedPreview.transport} · Target: ${parsedPreview.host}:${parsedPreview.port}",
+                            style = DeepCurrentMonoStyle.copy(fontSize = 11.sp, color = colors.textMid)
+                        )
+                    }
+                }
 
                 if (errorMessage != null) {
                     Spacer(modifier = Modifier.height(6.dp))
@@ -678,17 +992,27 @@ fun ImportConfigDialog(
             Button(
                 onClick = {
                     if (importText.isBlank()) {
-                        errorMessage = "Please enter or paste config data"
+                        errorMessage = "Please choose a file or paste configuration."
                         return@Button
                     }
-                    val success = onImport(importText)
-                    if (success) onDismiss()
-                    else errorMessage = "Unrecognized format. Check JSON, .hc, or SSH URI syntax."
+                    val fileName = selectedFileName
+                    val success = if (fileName != null && onImportFile != null) {
+                        onImportFile(fileName, importText)
+                    } else {
+                        onImport(importText)
+                    }
+
+                    if (success) {
+                        Toast.makeText(context, "Profile imported successfully", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    } else {
+                        errorMessage = "Unrecognized format. Verify .termux, JSON, or SSH format."
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.bgBase),
                 shape = DeepCurrentTheme.radius.pill
             ) {
-                Text("Import")
+                Text("Import Profile", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

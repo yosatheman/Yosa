@@ -1,6 +1,6 @@
 {
-  "name": "Deep Current",
-  "description": "High-contrast VPN and tunnel client with multi-transport profiles, payload injection, and latency diagnostics.",
+  "name": "Mr Unknown",
+  "description": "Mr Unknown - Cyber stealth proxy & encrypted tunneling utility supporting SSH, SSL, WebSocket, DNS, and .termux configuration profiles.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -60,6 +60,34 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testConfigParserTermuxExportAndParse() {
+        val profile = ProfileEntity(
+            name = "Mr Unknown SG Stealth",
+            transport = "SSH",
+            host = "sg-stealth.mrunknown.io",
+            port = 22,
+            username = "unknown_agent",
+            password = "stealth_pass_99"
+        )
+
+        val termuxContent = ConfigParser.exportToTermux(profile)
+        assertTrue(termuxContent.contains(".termux"))
+        assertTrue(termuxContent.contains("[MR_UNKNOWN_TERMUX_CONFIG]"))
+        assertTrue(termuxContent.contains("ssh -p 22 -D 1080 unknown_agent@sg-stealth.mrunknown.io"))
+
+        val fileName = ConfigParser.getTermuxFileName(profile)
+        assertEquals("mr_unknown_sg_stealth.termux", fileName)
+
+        val parsed = ConfigParser.parse(termuxContent)
+        assertNotNull(parsed)
+        assertEquals("Mr Unknown SG Stealth", parsed?.name)
+        assertEquals("SSH", parsed?.transport)
+        assertEquals("sg-stealth.mrunknown.io", parsed?.host)
+        assertEquals(22, parsed?.port)
+        assertEquals("unknown_agent", parsed?.username)
+    }
+
+    @Test
     fun testConfigParserSshUri() {
         val uri = "ssh://myuser:secret123@192.168.1.50:2222"
         val parsed = ConfigParser.parse(uri)

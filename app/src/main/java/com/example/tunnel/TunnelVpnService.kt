@@ -50,7 +50,7 @@ class TunnelVpnService : VpnService() {
 
             try {
                 val builder = Builder()
-                    .setSession("Deep Current: ${profile.name}")
+                    .setSession("Mr Unknown: ${profile.name}")
                     .setMtu(profile.mtu)
                     .addAddress("10.0.0.2", 24)
                     .addRoute("0.0.0.0", 0)
@@ -103,7 +103,7 @@ class TunnelVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Deep Current Tunnel",
+                "Mr Unknown Tunnel",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "VPN connection status and statistics"
@@ -134,7 +134,7 @@ class TunnelVpnService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Deep Current — Connected")
+            .setContentTitle("Mr Unknown — Connected")
             .setContentText("Tunneling via $profileName")
             .setSmallIcon(com.example.R.drawable.ic_launcher_fg_art)
             .setContentIntent(pendingIntent)

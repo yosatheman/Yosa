@@ -12,7 +12,7 @@
         android:id="@+id/widget_profile_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Deep Current"
+        android:text="Mr Unknown"
         android:textColor="#A6AEBD"
         android:textSize="13sp"
         android:textStyle="bold"
