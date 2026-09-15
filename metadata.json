@@ -1,0 +1,6 @@
+{
+  "name": "Deep Current",
+  "description": "High-contrast VPN and tunnel client with multi-transport profiles, payload injection, and latency diagnostics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
